@@ -169,6 +169,10 @@ def generate_excel(state):
                 sc(ws.cell(row=row, column=sc_, value=f"Set {si+1}"), SET1_BG, WHITE, border=medium_b)
                 for x in range(1,4):
                     sc(ws.cell(row=row, column=sc_+x), SET1_BG, WHITE, border=medium_b)
+            # Merge decision col header vertically (set_hdr_row + sub_hdr_row)
+            ws.cell(row=set_hdr_row, column=decision_col).value = "Progres"
+            sc(ws.cell(row=set_hdr_row, column=decision_col), SET1_BG, WHITE, border=medium_b)
+            ws.merge_cells(start_row=set_hdr_row, start_column=decision_col, end_row=set_hdr_row+1, end_column=decision_col)
             row += 1
 
             # Sub-header
@@ -212,8 +216,17 @@ def generate_excel(state):
                     sc(ws.cell(row=row, column=sc_+1, value=tgt_str), bg, DARK)
 
                     actual_val = get_actual(data, wkey, week_idx, ex["name"], si)
-                    c = ws.cell(row=row, column=sc_+2, value=int(actual_val) if actual_val not in (None,"") else None)
-                    sc(c, bg, DARK)
+                    actual_int = int(actual_val) if actual_val not in (None,"") else None
+                    c = ws.cell(row=row, column=sc_+2, value=actual_int)
+                    if actual_int is None:
+                        act_fg = DARK
+                    elif actual_int >= tgt["max"]:
+                        act_fg = "1F7A1F"  # verde - la sau peste max
+                    elif actual_int >= tgt["min"]:
+                        act_fg = "E06C00"  # portocaliu - in target
+                    else:
+                        act_fg = "CC0000"  # rosu - sub min
+                    sc(c, bg, act_fg)
 
                     act_let  = get_column_letter(sc_+2)
                     tmax_let = get_column_letter(tmax_cols[si])
