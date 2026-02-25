@@ -60,8 +60,8 @@ PULL_EXERCISES = [
      "targets":[{"min":8,"max":12},{"min":8,"max":12},{"min":8,"max":12}]},
     {"name":"Wide Grip Seated Cable Row", "sets":3,"settings_row":11,"init":[40,40,40],
      "targets":[{"min":8,"max":12},{"min":8,"max":12},{"min":8,"max":12}]},
-    {"name":"Incline Dumbbell Curl",      "sets":2,"settings_row":12,"init":[10,10],
-     "targets":[{"min":8,"max":10},{"min":8,"max":10}]},
+    {"name":"Incline Dumbbell Curl",      "sets":3,"settings_row":12,"init":[10,10,10],
+     "targets":[{"min":8,"max":10},{"min":8,"max":10},{"min":8,"max":10}]},
     {"name":"Machine Bicep Curl",         "sets":3,"settings_row":13,"init":[22.5,22.5,22.5],
      "targets":[{"min":10,"max":15},{"min":10,"max":15},{"min":10,"max":15}]},
 ]
