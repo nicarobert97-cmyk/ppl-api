@@ -388,7 +388,9 @@ def export():
             download_name='Push_Pull_Legs_Tracker.xlsx'
         )
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        traceback.print_exc()  # apare in Deploy Logs
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
 
 @app.route('/')
 def health():
