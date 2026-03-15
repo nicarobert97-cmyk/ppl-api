@@ -3,7 +3,8 @@ from flask_cors import CORS
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
-import json, io
+from openpyxl.drawing.image import Image as XLImage
+import json, io, base64
 
 app = Flask(__name__)
 CORS(app)
@@ -16,6 +17,19 @@ thin   = Side(style="thin",   color="000000")
 medium = Side(style="medium", color="000000")
 thin_b   = Border(left=thin,   right=thin,   top=thin,   bottom=thin)
 medium_b = Border(left=medium, right=medium, top=medium, bottom=medium)
+thick    = Side(style="thick")
+
+def apply_thick_outside_border(ws, first_row, last_row, col):
+    """Aplică Thick Outside Border pe o celulă merged (coloană singulară)."""
+    for r in range(first_row, last_row + 1):
+        is_top    = (r == first_row)
+        is_bottom = (r == last_row)
+        ws.cell(row=r, column=col).border = Border(
+            left   = thick,
+            right  = thick,
+            top    = thick  if is_top    else Side(style=None),
+            bottom = thick  if is_bottom else Side(style=None),
+        )
 
 def sc(cell, bg, fg, bold=True, border=None, h="center", size=11):
     if bg: cell.fill = fill(bg)
@@ -29,6 +43,7 @@ SET_BG=["D9F2D9","FFF2CC","FCE4D6","F8CBAD"]
 INC_BG="E2EFDA"; INC_FG="1F7A1F"
 HLD_BG="FFF2CC"; HLD_FG="7F6000"
 DEC_BG="FCE4D6"; DEC_FG="CC0000"
+VOL_BG="E8DAEF"  # mov deschis pentru Volume si Total Volume
 
 WEEK_LABELS=[
     "Week 1 (23 Feb - 01 Mar)","Week 2 (02 Mar - 08 Mar)","Week 3 (09 Mar - 15 Mar)",
@@ -132,6 +147,8 @@ def generate_excel(state):
         tmin_cols = list(range(hidden_start, hidden_start + set_count))
         tmax_cols = list(range(hidden_start + set_count, hidden_start + 2*set_count))
         decision_col = hidden_start + 2*set_count
+        vol_col      = decision_col + 1
+        total_col    = decision_col + 2
 
         ws.column_dimensions["A"].width = 40
         for si in range(set_count):
@@ -141,6 +158,8 @@ def generate_excel(state):
             ws.column_dimensions[get_column_letter(sc_+2)].width = 12
             ws.column_dimensions[get_column_letter(sc_+3)].width = 7
         ws.column_dimensions[get_column_letter(decision_col)].width = 13
+        ws.column_dimensions[get_column_letter(decision_col + 1)].width = 10
+        ws.column_dimensions[get_column_letter(decision_col + 2)].width = 10
         for col in tmin_cols + tmax_cols:
             ws.column_dimensions[get_column_letter(col)].hidden = True
 
@@ -149,13 +168,15 @@ def generate_excel(state):
 
         for week_idx in range(12):
             ex_rows_this_week = []
+            ex_vol_cells = []
 
             # Week header
+            week_hdr_row = row
             ws.row_dimensions[row].height = 26.1
-            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=last_vis_col)
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=total_col)
             c = ws.cell(row=row, column=1, value=WEEK_LABELS[week_idx])
             sc(c, WEEK_BG, WHITE, border=medium_b, h="left", size=13)
-            for col in range(2, last_vis_col+1):
+            for col in range(2, total_col+1):
                 sc(ws.cell(row=row, column=col), WEEK_BG, WHITE, border=medium_b)
             row += 1
 
@@ -170,9 +191,18 @@ def generate_excel(state):
                 for x in range(1,4):
                     sc(ws.cell(row=row, column=sc_+x), SET1_BG, WHITE, border=medium_b)
             # Merge decision col header vertically (set_hdr_row + sub_hdr_row)
-            ws.cell(row=set_hdr_row, column=decision_col).value = "Progres"
+            ws.cell(row=set_hdr_row, column=decision_col).value = "Progress"
             sc(ws.cell(row=set_hdr_row, column=decision_col), SET1_BG, WHITE, border=medium_b)
             ws.merge_cells(start_row=set_hdr_row, start_column=decision_col, end_row=set_hdr_row+1, end_column=decision_col)
+            # Volume + Total headers
+            c_vol = ws.cell(row=set_hdr_row, column=vol_col, value="Volume (kg*rep)")
+            sc(c_vol, SET1_BG, WHITE, border=medium_b)
+            c_vol.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
+            ws.merge_cells(start_row=set_hdr_row, start_column=vol_col, end_row=set_hdr_row+1, end_column=vol_col)
+            c_tot = ws.cell(row=set_hdr_row, column=total_col, value="Total Volume")
+            sc(c_tot, SET1_BG, WHITE, border=medium_b)
+            c_tot.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
+            ws.merge_cells(start_row=set_hdr_row, start_column=total_col, end_row=set_hdr_row+1, end_column=total_col)
             row += 1
 
             # Sub-header
@@ -259,7 +289,31 @@ def generate_excel(state):
                 else:                   dec_bg, dec_fg = EX_BG,  DARK
                 sc(dec_cell, dec_bg, dec_fg)
 
+                # ── X: volum per exercițiu = Σ(Actual × Kg) per set ──
+                # vol_col și total_col sunt deja definite mai sus în week loop
+                vol_parts = []
+                for si in range(ex["sets"]):
+                    act_l = get_column_letter(set_start[si] + 2)
+                    kg_l  = get_column_letter(set_start[si])
+                    vol_parts.append(f'IF({act_l}{row}="","",{act_l}{row}*{kg_l}{row})')
+                vol_formula = "=" + "+".join([f'IFERROR({p},0)' for p in vol_parts])
+                vol_cell = ws.cell(row=row, column=vol_col, value=vol_formula)
+                sc(vol_cell, VOL_BG, DARK, border=medium_b)
+                ex_vol_cells.append(get_column_letter(vol_col) + str(row))
+
                 row += 1
+
+            # ── Y: Total Volume — merge pe toate rândurile de exerciții, centrat ──
+            if ex_vol_cells and ex_rows_this_week:
+                y_formula = "=" + "+".join([f"IFERROR({c},0)" for c in ex_vol_cells])
+                first_ex_row = ex_rows_this_week[0]
+                last_ex_row  = ex_rows_this_week[-1]
+                ws.merge_cells(start_row=first_ex_row, start_column=total_col,
+                                end_row=last_ex_row,   end_column=total_col)
+                y_cell = ws.cell(row=first_ex_row, column=total_col, value=y_formula)
+                sc(y_cell, VOL_BG, DARK, border=Border())  # fara border din sc
+                y_cell.alignment = Alignment(horizontal="center", vertical="center")
+                apply_thick_outside_border(ws, first_ex_row, last_ex_row, total_col)
 
             week_ex_rows.append(ex_rows_this_week)
             ws.row_dimensions[row].height = 8
@@ -268,6 +322,52 @@ def generate_excel(state):
     build_sheet("Push Plan", "push", PUSH_EXERCISES)
     build_sheet("Pull Plan", "pull", PULL_EXERCISES)
     build_sheet("Legs Plan", "legs", LEGS_EXERCISES)
+
+    # ── Insert photos ──────────────────────────────────────────
+    photos = state.get("photos", {})
+    # Push: 4 sets, last visible col = Q(17), decision = R(18) → photo at AB(28)
+    # Pull/Legs: 3 sets, last visible col = M(13), decision = N(14) → photo at V(22)
+    sheet_map = {
+        "push": ("Push Plan",  28),  # col AB
+        "pull": ("Pull Plan",  22),  # col V
+        "legs": ("Legs Plan",  22),  # col V
+    }
+    # Row layout per week: 1 week-header + 2 sub-headers + 6 exercises + 1 spacer = 10 rows
+    WEEK_BLOCK = 10
+    # Photo target size in Excel: width ~400px, height ~180px (covers 9 rows of the week block)
+    # Fixed target size: 8 cols x 9 rows = 512x180px (forced, no aspect ratio kept)
+    PHOTO_WIDTH  = 512
+    PHOTO_HEIGHT = 180
+
+    from PIL import Image as PILImage
+
+    for wkey, (sheet_name, photo_col) in sheet_map.items():
+        ws_photo = wb[sheet_name]
+        for week_idx in range(12):
+            photo_key = f"photo_{wkey}_{week_idx}"
+            if photo_key not in photos:
+                continue
+            b64 = photos[photo_key]
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            img_bytes = base64.b64decode(b64)
+
+            # Force resize to exact 512x180 (fills 8 cols x 9 rows)
+            pil_img = PILImage.open(io.BytesIO(img_bytes))
+            pil_img = pil_img.resize((PHOTO_WIDTH, PHOTO_HEIGHT), PILImage.LANCZOS)
+
+            out_stream = io.BytesIO()
+            pil_img.save(out_stream, format='PNG')
+            out_stream.seek(0)
+
+            img = XLImage(out_stream)
+            img.width  = PHOTO_WIDTH
+            img.height = PHOTO_HEIGHT
+
+            week_start_row = week_idx * WEEK_BLOCK + 1
+            anchor = f"{get_column_letter(photo_col)}{week_start_row}"
+            img.anchor = anchor
+            ws_photo.add_image(img)
 
     output = io.BytesIO()
     wb.save(output)
