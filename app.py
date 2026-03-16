@@ -101,7 +101,12 @@ def get_actual(data, wkey, week_idx, ex_name, si):
     try: return data[wkey][week_idx][ex_name][si]
     except: return None
 
-def get_decision(data, wkey, week_idx, ex):
+def get_decision(data, wkey, week_idx, ex, overrides=None):
+    # Check manual override first
+    if overrides:
+        key = f"{wkey}_{week_idx}_{ex['name']}"
+        if key in overrides:
+            return overrides[key]
     actuals = [get_actual(data, wkey, week_idx, ex["name"], si) for si in range(ex["sets"])]
     if any(a is None or a == "" for a in actuals): return ""
     actuals = [int(a) for a in actuals]
@@ -111,8 +116,9 @@ def get_decision(data, wkey, week_idx, ex):
     return "HOLD"
 
 def generate_excel(state):
-    settings = state.get("settings", {})
-    data     = state.get("data", {})
+    settings  = state.get("settings", {})
+    data      = state.get("data", {})
+    overrides = state.get("overrides", {})
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -237,10 +243,31 @@ def generate_excel(state):
                         pr = week_ex_rows[week_idx-1][ex_idx]
                         kg_let  = get_column_letter(sc_)
                         dec_let = get_column_letter(decision_col)
-                        kg_cell.value = (
-                            f'=IF({dec_let}{pr}="INCREASE",{kg_let}{pr}+Settings!$B${sr},'
-                            f'IF({dec_let}{pr}="DECREASE",{kg_let}{pr}-Settings!$C${sr},{kg_let}{pr}))'
-                        )
+                        sr_val  = ex["settings_row"]
+                        step    = settings.get(ex["name"], {})
+                        # Check if previous week has a manual override
+                        prev_override_key = f"{wkey}_{week_idx-1}_{ex['name']}"
+                        if overrides and prev_override_key in overrides:
+                            # Calculate kg directly in Python using override decision
+                            prev_kg = ex["init"][si] if week_idx == 1 else None
+                            # Recursively get prev kg value
+                            def get_kg_val(w_idx, s_idx):
+                                if w_idx == 0:
+                                    return ex["init"][s_idx]
+                                pkey = f"{wkey}_{w_idx-1}_{ex['name']}"
+                                dec = overrides.get(pkey) if overrides else None
+                                if dec is None:
+                                    dec = get_decision(data, wkey, w_idx-1, ex, overrides)
+                                prev = get_kg_val(w_idx-1, s_idx)
+                                if dec == "INCREASE": return prev + step.get("up", 0)
+                                if dec == "DECREASE": return prev - step.get("down", 0)
+                                return prev
+                            kg_cell.value = get_kg_val(week_idx, si)
+                        else:
+                            kg_cell.value = (
+                                f'=IF({dec_let}{pr}="INCREASE",{kg_let}{pr}+Settings!$B${sr_val},'
+                                f'IF({dec_let}{pr}="DECREASE",{kg_let}{pr}-Settings!$C${sr_val},{kg_let}{pr}))'
+                            )
                     sc(kg_cell, bg, DARK)
 
                     sc(ws.cell(row=row, column=sc_+1, value=tgt_str), bg, DARK)
@@ -282,7 +309,7 @@ def generate_excel(state):
                 dec_cell = ws.cell(row=row, column=decision_col)
                 dec_cell.value = dec_formula
 
-                dec = get_decision(data, wkey, week_idx, ex)
+                dec = get_decision(data, wkey, week_idx, ex, overrides)
                 if dec == "INCREASE":   dec_bg, dec_fg = INC_BG, INC_FG
                 elif dec == "HOLD":     dec_bg, dec_fg = HLD_BG, HLD_FG
                 elif dec == "DECREASE": dec_bg, dec_fg = DEC_BG, DEC_FG
