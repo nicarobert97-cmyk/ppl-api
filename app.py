@@ -407,6 +407,8 @@ def export():
         return '', 204
     try:
         state = request.get_json()
+        import sys
+        print(f"DEBUG overrides received: {state.get('overrides', {})}", file=sys.stderr)
         output = generate_excel(state)
         return send_file(
             output,
