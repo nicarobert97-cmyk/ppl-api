@@ -307,7 +307,11 @@ def generate_excel(state):
                     f'IF(AND({all_max}),"INCREASE","HOLD")))'
                 )
                 dec_cell = ws.cell(row=row, column=decision_col)
-                dec_cell.value = dec_formula
+                override_key = f"{wkey}_{week_idx}_{ex['name']}"
+                if overrides and override_key in overrides:
+                    dec_cell.value = overrides[override_key]
+                else:
+                    dec_cell.value = dec_formula
 
                 dec = get_decision(data, wkey, week_idx, ex, overrides)
                 if dec == "INCREASE":   dec_bg, dec_fg = INC_BG, INC_FG
